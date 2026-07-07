@@ -163,7 +163,7 @@ if 'scrape_confirm' not in st.session_state:
     st.session_state.scrape_confirm = False
 
 if _IS_CLOUD:
-    st.info("ℹ️ **Scraping is disabled on the hosted app** — it requires a local Chrome browser. To refresh data, run `python run_scrape.py` locally and push the updated files to GitHub.", icon="🖥️")
+    st.info("🔄 **Data updates automatically every Monday** — no action needed. The latest Nium Playbook data is always pulled fresh and reflected here within the hour.", icon="✅")
 elif not st.session_state.scrape_confirm:
     if st.button("🔄 Refresh Data (Scrape from Nium Playbook)", use_container_width=True, key="refresh"):
         st.session_state.scrape_confirm = True
