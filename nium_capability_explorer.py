@@ -323,12 +323,7 @@ with f4:
     )
     tats = st.multiselect("TAT", tat_opts, key="t", placeholder="All")
 
-c1, c2, c3, c4 = st.columns(4)
-with c1: b2b = st.checkbox("B2B", key="chk_b2b")
-with c2: b2p = st.checkbox("B2P", key="chk_b2p")
-with c3: p2p = st.checkbox("P2P", key="chk_p2p")
-with c4: p2b = st.checkbox("P2B", key="chk_p2b")
-txn = [x for x, v in [("B2B", b2b), ("B2P", b2p), ("P2P", p2p), ("P2B", p2b)] if v]
+txn = []
 
 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -341,7 +336,7 @@ if tats:                   df = df[df['TAT'].isin(tats)]
 if txn:                    df = df[df.apply(lambda r: all(t in str(r['Supported Modes']).split(', ') for t in txn), axis=1)]
 
 # ── Results Bar ──
-active_count = sum([bool(countries), bool(modes), bool(currencies), bool(tats), bool(txn)])
+active_count = sum([bool(countries), bool(modes), bool(currencies), bool(tats)])
 rc1, rc2 = st.columns([5, 1.5])
 with rc1:
     st.markdown(f"""
