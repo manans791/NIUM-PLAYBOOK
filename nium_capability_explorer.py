@@ -133,13 +133,6 @@ def format_cell_value(v):
 # UI — HEADER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-last_updated = get_last_updated()
-updated_html = (
-    f'<div class="n-updated">Last updated: {last_updated}</div>'
-    if last_updated else
-    '<div class="n-updated">No data yet — click 🔄 Refresh</div>'
-)
-
 st.markdown(f"""
 <div class="n-hdr">
     <div class="n-logo">
@@ -147,7 +140,6 @@ st.markdown(f"""
         <div>
             <h1>Nium Playbook</h1>
             <div class="n-sub">Global Payout Capability Explorer</div>
-            {updated_html}
         </div>
     </div>
 </div>
