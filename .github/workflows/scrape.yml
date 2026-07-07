@@ -1,0 +1,36 @@
+﻿name: Scrape Nium Playbook
+
+on:
+  schedule:
+    - cron: "0 2 * * 1"   # Every Monday at 2am UTC (10am SGT)
+  workflow_dispatch:        # Also allows manual trigger from GitHub UI
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Install dependencies
+        run: pip install -r requirements-scrape.txt
+
+      - name: Run scraper
+        run: python run_scrape.py
+
+      - name: Commit updated data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/ scraped_data/
+          git diff --cached --quiet || git commit -m "chore: auto-scrape data $(date -u +%Y-%m-%d)"
+          git push

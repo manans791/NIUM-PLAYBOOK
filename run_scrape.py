@@ -1,6 +1,7 @@
 """Standalone scrape runner — use instead of the Streamlit UI for testing."""
 import sys
-sys.path.insert(0, r"C:\Automations\Playbook APp")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
 
 from scraper import scrape_dataset, transform_raw_to_wide, save_scraped_data, log_scrape_failures
 

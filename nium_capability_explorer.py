@@ -157,15 +157,19 @@ st.markdown(f"""
 # UI — REFRESH BUTTON
 # ═══════════════════════════════════════════════════════════════════════════════
 
+_IS_CLOUD = os.environ.get("STREAMLIT_SHARING_MODE") or os.environ.get("IS_STREAMLIT_CLOUD") or "/mount/src" in os.path.abspath(__file__)
+
 if 'scrape_confirm' not in st.session_state:
     st.session_state.scrape_confirm = False
 
-if not st.session_state.scrape_confirm:
+if _IS_CLOUD:
+    st.info("ℹ️ **Scraping is disabled on the hosted app** — it requires a local Chrome browser. To refresh data, run `python run_scrape.py` locally and push the updated files to GitHub.", icon="🖥️")
+elif not st.session_state.scrape_confirm:
     if st.button("🔄 Refresh Data (Scrape from Nium Playbook)", use_container_width=True, key="refresh"):
         st.session_state.scrape_confirm = True
         st.rerun()
 
-if st.session_state.scrape_confirm:
+if not _IS_CLOUD and st.session_state.scrape_confirm:
     st.markdown("""
     <div style="background:#fff8e1;border:1px solid #f59e0b;border-radius:10px;padding:0.9rem 1.2rem;margin-bottom:0.8rem;">
         <strong style="color:#92400e;">⚠️ Confirm Full Scrape</strong><br>
