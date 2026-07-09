@@ -327,6 +327,33 @@ if currencies:             df = df[df['Currency'].isin(currencies)]
 if tats:                   df = df[df['TAT'].isin(tats)]
 if txn:                    df = df[df.apply(lambda r: all(t in str(r['Supported Modes']).split(', ') for t in txn), axis=1)]
 
+# ── Merge Transaction Limit columns ──
+_LIMIT_TYPES = ['B2B', 'B2P', 'P2B', 'P2P']
+_LIMIT_COLS   = [f'Transaction limit per end-user - {t} - {m}'
+                 for t in _LIMIT_TYPES for m in ('Min', 'Max')]
+_LIMIT_COLS   = [c for c in _LIMIT_COLS if c in df.columns]
+
+if _LIMIT_COLS:
+    def _fmt_limits(row):
+        lines = ['Min']
+        for t in _LIMIT_TYPES:
+            col = f'Transaction limit per end-user - {t} - Min'
+            val = row.get(col, None)
+            val = 'Not Supported' if (val is None or (isinstance(val, float) and pd.isna(val)) or str(val).strip() == '') else str(val).strip()
+            lines.append(f'  {t}: {val}')
+        lines.append('Max')
+        for t in _LIMIT_TYPES:
+            col = f'Transaction limit per end-user - {t} - Max'
+            val = row.get(col, None)
+            val = 'Not Supported' if (val is None or (isinstance(val, float) and pd.isna(val)) or str(val).strip() == '') else str(val).strip()
+            lines.append(f'  {t}: {val}')
+        return '\n'.join(lines)
+
+    df = df.copy()
+    insert_at = df.columns.get_loc(_LIMIT_COLS[0])
+    df.insert(insert_at, 'Transaction Limits', df.apply(_fmt_limits, axis=1))
+    df.drop(columns=_LIMIT_COLS, inplace=True)
+
 # ── Results Bar ──
 active_count = sum([bool(countries), bool(modes), bool(currencies), bool(tats)])
 rc1, rc2 = st.columns([5, 1.5])
