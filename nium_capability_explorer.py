@@ -377,6 +377,20 @@ if _LIMIT_COLS:
     df.insert(insert_at, 'Transaction Limits', df.apply(_fmt_limits, axis=1))
     df.drop(columns=_LIMIT_COLS, inplace=True)
 
+# ── Column selector (full width) ──
+if len(df) > 0:
+    st.markdown("**Select your columns**")
+    selected_cols = st.multiselect(
+        "Select your columns",
+        options=df.columns.tolist(),
+        default=df.columns.tolist(),
+        placeholder="Select columns…",
+        label_visibility="collapsed",
+    )
+    download_df = df[selected_cols] if selected_cols else df
+else:
+    download_df = df
+
 # ── Results Bar ──
 active_count = sum([bool(countries), bool(modes), bool(currencies), bool(tats)])
 rc1, rc2 = st.columns([5, 1.5])
@@ -389,14 +403,6 @@ with rc1:
     """, unsafe_allow_html=True)
 with rc2:
     if len(df) > 0:
-        selected_cols = st.multiselect(
-            "Columns to download",
-            options=df.columns.tolist(),
-            default=df.columns.tolist(),
-            placeholder="Select columns…",
-            label_visibility="collapsed",
-        )
-        download_df = df[selected_cols] if selected_cols else df
         excel_buf = create_formatted_excel(download_df, download_df.columns.tolist(), ds)
         st.download_button(
             "⬇ Download Excel", excel_buf,
