@@ -366,7 +366,15 @@ with rc1:
     """, unsafe_allow_html=True)
 with rc2:
     if len(df) > 0:
-        excel_buf = create_formatted_excel(df, df.columns.tolist(), ds)
+        selected_cols = st.multiselect(
+            "Columns to download",
+            options=df.columns.tolist(),
+            default=df.columns.tolist(),
+            placeholder="Select columns…",
+            label_visibility="collapsed",
+        )
+        download_df = df[selected_cols] if selected_cols else df
+        excel_buf = create_formatted_excel(download_df, download_df.columns.tolist(), ds)
         st.download_button(
             "⬇ Download Excel", excel_buf,
             f"Nium_Capability_Matrix_{ds}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
