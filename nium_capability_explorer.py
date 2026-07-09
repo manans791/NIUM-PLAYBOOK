@@ -59,6 +59,7 @@ st.markdown("""
 *, .main, .block-container, .stApp { font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif !important; }
 .block-container { padding: 1rem 2rem 2rem 2rem; max-width: 100%; }
 #MainMenu, footer, header { visibility: hidden; }
+[data-testid="column-header-menu"] { display: none !important; }
 hr { margin: 0.5rem 0; opacity: 0.08; }
 
 .n-hdr {
