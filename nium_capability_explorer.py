@@ -108,6 +108,24 @@ hr { margin: 0.5rem 0; opacity: 0.08; }
 .n-ft { text-align:center; color:#94a3b8; font-size:0.68rem; padding:1.2rem 0 0.5rem 0; margin-top:1.5rem; border-top:1px solid #e0efe8; }
 .n-ft span { color:#00D4AA; font-weight:600; }
 </style>
+<script>
+(function() {
+    function injectIntoIframes() {
+        document.querySelectorAll('iframe').forEach(function(iframe) {
+            try {
+                var doc = iframe.contentDocument || iframe.contentWindow.document;
+                if (doc && !doc.getElementById('hide-col-menu')) {
+                    var s = doc.createElement('style');
+                    s.id = 'hide-col-menu';
+                    s.textContent = 'button[aria-label="open column actions"], [data-testid="column-header-menu"], .gdg-column-menu { display:none !important; }';
+                    doc.head && doc.head.appendChild(s);
+                }
+            } catch(e) {}
+        });
+    }
+    setInterval(injectIntoIframes, 800);
+})();
+</script>
 """, unsafe_allow_html=True)
 
 
