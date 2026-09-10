@@ -7,18 +7,16 @@ Run:
 """
 
 import os
-import time
 from datetime import datetime
 
 import pandas as pd
 import streamlit as st
-import streamlit.components.v1 as components
 
 from config import CACHE_TTL_SECONDS
 from scraper import (
-    scrape_dataset, transform_raw_to_wide, save_scraped_data,
-    log_scrape_failures, create_formatted_excel, get_last_updated,
-    COUNTRIES, FI_PATH, NON_FI_PATH,
+    transform_raw_to_wide, save_scraped_data,
+    create_formatted_excel, get_last_updated,
+    FI_PATH, NON_FI_PATH,
 )
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -53,7 +51,7 @@ def load_data_cached():
 # PAGE CONFIG & STYLING
 # ═══════════════════════════════════════════════════════════════════════════════
 
-st.set_page_config(page_title="Nium Playbook", page_icon="⚡", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Nium Atlas", page_icon="⚡", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
 <style>
@@ -112,26 +110,6 @@ hr { margin: 0.5rem 0; opacity: 0.08; }
 </style>
 """, unsafe_allow_html=True)
 
-components.html("""
-<script>
-(function() {
-    function hide() {
-        try {
-            var p = window.parent.document;
-            if (!p.getElementById('nium-hide-col-menu')) {
-                var s = p.createElement('style');
-                s.id = 'nium-hide-col-menu';
-                s.textContent = '[data-testid="column-header-menu"], button[aria-label="open column actions"] { display:none !important; }';
-                p.head.appendChild(s);
-            }
-        } catch(e) {}
-    }
-    hide();
-    setInterval(hide, 1000);
-})();
-</script>
-""", height=0)
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELPERS
@@ -161,104 +139,14 @@ st.markdown(f"""
     <div class="n-logo">
         <div class="n-icon">N</div>
         <div>
-            <h1>Nium Playbook</h1>
+            <h1>Nium Atlas</h1>
             <div class="n-sub">Global Payout Capability Explorer</div>
         </div>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# UI — REFRESH BUTTON
-# ═══════════════════════════════════════════════════════════════════════════════
-
-_IS_CLOUD = os.environ.get("STREAMLIT_SHARING_MODE") or os.environ.get("IS_STREAMLIT_CLOUD") or "/mount/src" in os.path.abspath(__file__)
-
-if 'scrape_confirm' not in st.session_state:
-    st.session_state.scrape_confirm = False
-
-if _IS_CLOUD:
-    st.info("🔄 **Data updates automatically every Monday at 2:00 AM UTC (7:30 AM IST / 10:00 AM SGT)** — no action needed. The latest Nium Playbook data is always pulled fresh and reflected here within the hour.", icon="✅")
-elif not st.session_state.scrape_confirm:
-    if st.button("🔄 Refresh Data (Scrape from Nium Playbook)", use_container_width=True, key="refresh"):
-        st.session_state.scrape_confirm = True
-        st.rerun()
-
-if not _IS_CLOUD and st.session_state.scrape_confirm:
-    st.markdown("""
-    <div style="background:#fff8e1;border:1px solid #f59e0b;border-radius:10px;padding:0.9rem 1.2rem;margin-bottom:0.8rem;">
-        <strong style="color:#92400e;">⚠️ Confirm Full Scrape</strong><br>
-        <span style="font-size:0.85rem;color:#78350f;">
-        This will scrape <strong>{len(COUNTRIES)} countries × 2 datasets</strong> from Nium Playbook.
-        It takes approximately <strong>25 minutes</strong> — do not close the browser tab.
-        Existing data in <code>data/</code> will be overwritten.
-        </span>
-    </div>
-    """, unsafe_allow_html=True)
-
-    btn_col1, btn_col2 = st.columns(2)
-    with btn_col1:
-        start_scrape = st.button("▶ Yes, Start Scrape", use_container_width=True, key="confirm_scrape")
-    with btn_col2:
-        if st.button("✕ Cancel", use_container_width=True, key="cancel_scrape"):
-            st.session_state.scrape_confirm = False
-            st.rerun()
-
-    if start_scrape:
-        st.session_state.scrape_confirm = False
-        st.markdown("---")
-
-        st.markdown("**Scraping FI dataset** (Financial Institutions)")
-        fi_bar    = st.progress(0, text="Waiting...")
-        fi_status = st.empty()
-
-        st.markdown("**Scraping Non-FI dataset**")
-        nfi_bar    = st.progress(0, text="Waiting...")
-        nfi_status = st.empty()
-
-        overall_status = st.empty()
-
-        try:
-            all_results = {}
-            bars = {"FI": (fi_bar, fi_status), "Non-FI": (nfi_bar, nfi_status)}
-
-            for ds_type in ["FI", "Non-FI"]:
-                bar, status = bars[ds_type]
-                status.caption(f"🚀 Starting {ds_type} scrape...")
-                raw_rows, failed = scrape_dataset(ds_type, bar, status)
-
-                status.caption(f"🔄 Transforming {ds_type} data ({len(raw_rows):,} raw rows)...")
-                df_scraped = transform_raw_to_wide(raw_rows)
-
-                if not df_scraped.empty:
-                    app_path, _ = save_scraped_data(df_scraped, ds_type)
-                    all_results[ds_type] = {"rows": len(df_scraped), "failed_countries": failed}
-                    bar.progress(1.0, text=f"✅ {ds_type} done — {len(df_scraped):,} corridors")
-                    status.caption(f"✅ Saved to {app_path}")
-                else:
-                    all_results[ds_type] = {"rows": 0, "failed_countries": failed}
-                    bar.progress(1.0, text=f"⚠️ {ds_type} — no data returned")
-
-            failures_by_dataset = {ds: info['failed_countries'] for ds, info in all_results.items()}
-            log_path = log_scrape_failures(failures_by_dataset)
-            if log_path:
-                st.session_state['_scrape_failures'] = failures_by_dataset
-                st.session_state['_scrape_log_path'] = log_path
-
-            summary_lines = []
-            for ds_type, info in all_results.items():
-                summary_lines.append(f"**{ds_type}:** {info['rows']:,} corridors")
-                if info.get('failed_countries'):
-                    summary_lines.append(f"&nbsp;&nbsp;⚠️ {len(info['failed_countries'])} countries skipped — logged to `logs/scrape_failures.log`")
-
-            overall_status.success("✅ Scrape complete!\n\n" + "\n\n".join(summary_lines))
-            st.cache_data.clear()
-            time.sleep(2)
-            st.rerun()
-
-        except Exception as e:
-            overall_status.error(f"❌ Scrape failed: {str(e)}")
-            st.info("Make sure Chrome is installed and you have internet access.")
+st.info("🔄 **Data updates automatically every Monday at 2:00 AM UTC (7:30 AM IST / 10:00 AM SGT)** — no action needed. The latest Nium Atlas data is always pulled fresh and reflected here within the hour.", icon="✅")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # UI — LOAD & DISPLAY DATA
