@@ -69,26 +69,140 @@ def _format_country_url(name: str) -> str:
     slug = re.sub(r"[\s-]+", "-", slug)
     return slug.strip("-")
 
-def _normalize_title(t):
-    return (t.replace("Bank Account (ACH) (BANK)", "Bank Account (ACH)")
-             .replace("Wallet (WALLET)", "Wallet")
-             .strip())
-
-def _normalize_tat(t):
-    return t.split("/")[0].strip()
-
-def _extract_pills(container):
-    pills = container.find_all("span", class_=lambda c: c and "rounded" in c)
-    if pills:
-        return ", ".join(p.get_text(strip=True) for p in pills)
-    return container.get_text(strip=True)
-
 
 # ─── Scraper ──────────────────────────────────────────────────────────────────
 
+def _parse_method_page(soup, country_name, method_label):
+    """Parse a single atlas.nium.com method page and return raw_rows."""
+    rows = []
+
+    # ── Currencies ───────────────────────────────────────────────────────────
+    currencies = [
+        span.get("data-atlas-currency", "")
+        for span in soup.find_all("span", attrs={"data-atlas-currency": True})
+    ]
+    currency_str = ", ".join(c for c in currencies if c)
+
+    # ── TAT (speed badge + description) ──────────────────────────────────────
+    tat = ""
+    tat_details = ""
+    timing_row = soup.find("div", class_=lambda c: c and "figma-route-summary__row--timing" in c)
+    if timing_row:
+        timing_div = timing_row.find("div", class_=lambda c: c and "figma-route-summary__timing" in c)
+        if timing_div:
+            speed_span = timing_div.find("span")
+            if speed_span:
+                tat = speed_span.get_text(strip=True)
+            details_div = timing_div.find("div", class_=lambda c: c and "atlas-timing-details" in c)
+            if details_div:
+                tat_details = " | ".join(
+                    p.get_text(strip=True)
+                    for p in details_div.find_all("p")
+                    if p.get_text(strip=True)
+                )
+
+    # ── Supported modes (from the mode tablist) ───────────────────────────────
+    supported_modes = []
+    for tablist in soup.find_all(attrs={"role": "tablist"}):
+        label = (tablist.get("aria-label") or "").lower()
+        if "supported modes" in label:
+            for tab in tablist.find_all(attrs={"role": "tab"}):
+                text = tab.get_text(strip=True)
+                # Tab text is like "B2BBusiness to business" — take first 3 chars
+                mode = text[:3] if len(text) >= 3 else text
+                supported_modes.append(mode)
+    modes_str = ", ".join(supported_modes)
+
+    base = {
+        "Country":        country_name,
+        "Payment Mode":   method_label,
+        "Currency":       currency_str,
+        "TAT":            tat,
+        "Supported Modes": modes_str,
+    }
+
+    # TAT description as a key-value row
+    if tat_details:
+        rows.append({**base, "Key": "Cutoff & delivery timing", "Value": tat_details})
+
+    # ── Transaction limits table ──────────────────────────────────────────────
+    table = soup.find("table", class_=lambda c: c and "atlas-route-limit" in c)
+    if table:
+        mode_headers = []  # ["B2B", "B2P", "P2P", "P2B"]
+        thead = table.find("thead")
+        if thead:
+            all_col_ths = thead.find_all("th", attrs={"scope": "col"})
+            # First th is the table title ("Transaction limit per end-user"); skip it
+            mode_headers = [
+                th.get_text(separator=" ", strip=True)
+                for th in all_col_ths[1:]
+            ]
+        tbody = table.find("tbody")
+        if tbody:
+            for tr in tbody.find_all("tr"):
+                row_th = tr.find("th", attrs={"scope": "row"})
+                if not row_th:
+                    continue
+                row_label = re.sub(r'^[+\-−]\s*', '', row_th.get_text(strip=True)).strip()
+                for ci, td in enumerate(tr.find_all("td")):
+                    if ci < len(mode_headers):
+                        rows.append({
+                            **base,
+                            "Key":   f"Transaction limit per end-user - {mode_headers[ci]} - {row_label}",
+                            "Value": td.get_text(strip=True),
+                        })
+
+    # ── Ledger rows (simple key → paragraph value) ────────────────────────────
+    simple_fields = {
+        "Beneficiary statement narrative",
+        "Network participant",
+        "Channels",
+        "Routing code",
+        "Proof of payment",
+        "Notes",
+        "Beneficiary account type",
+    }
+
+    for ledger_div in soup.find_all("div", class_=lambda c: c and "figma-ledger-row" in c):
+        heading_tag = ledger_div.find(["h2", "h3"])
+        if not heading_tag:
+            continue
+        field_name = heading_tag.get_text(strip=True)
+        copy_div = ledger_div.find("div", class_=lambda c: c and "atlas-ledger-copy" in c)
+        if not copy_div:
+            continue
+
+        if field_name in simple_fields:
+            value = " ".join(
+                p.get_text(strip=True)
+                for p in copy_div.find_all("p")
+                if p.get_text(strip=True)
+            )
+            if value:
+                rows.append({**base, "Key": field_name, "Value": value})
+
+        elif field_name == "Mandatory data requirements":
+            groups = []
+            for group_div in copy_div.find_all("div", class_=lambda c: c and "atlas-requirement-group" in c):
+                group_h = group_div.find(["h3", "h4"])
+                group_name = group_h.get_text(strip=True) if group_h else ""
+                items = [li.get_text(strip=True) for li in group_div.find_all("li")]
+                if items:
+                    groups.append(f"{group_name}: {', '.join(items)}" if group_name else ", ".join(items))
+            if groups:
+                rows.append({**base, "Key": "Mandatory data requirements", "Value": "; ".join(groups)})
+
+        elif field_name == "Supporting documents":
+            items = [li.get_text(strip=True) for li in copy_div.find_all("li")]
+            if items:
+                rows.append({**base, "Key": "Supporting documents", "Value": ", ".join(items)})
+
+    return rows
+
+
 def scrape_dataset(dataset_type, progress_bar, status_text):
     """
-    Scrape playbook.nium.com for all countries.
+    Scrape atlas.nium.com for all countries.
     dataset_type: 'FI' or 'Non-FI'
     Returns: (raw_rows: list[dict], failed: list[str])
     """
@@ -100,7 +214,7 @@ def scrape_dataset(dataset_type, progress_bar, status_text):
     from webdriver_manager.chrome import ChromeDriverManager
     from bs4 import BeautifulSoup
 
-    url_suffix = "/institutions" if dataset_type == "FI" else ""
+    fi_param = "&audience=fi" if dataset_type == "FI" else ""
 
     options = webdriver.ChromeOptions()
     options.add_argument("--headless=new")
@@ -122,109 +236,70 @@ def scrape_dataset(dataset_type, progress_bar, status_text):
         progress_bar.progress(pct, text=f"Scraping {dataset_type}: {country_name} ({idx+1}/{total})")
         status_text.caption(f"⏳ {country_name}...")
 
-        url = f"https://playbook.nium.com/country/{_format_country_url(country_name)}{url_suffix}"
+        slug        = _format_country_url(country_name)
+        country_url = f"https://atlas.nium.com/country/{slug}"
+        if dataset_type == "FI":
+            country_url += "?audience=fi"
 
+        # ── Step 1: load country page to discover available method IDs ────────
         page_loaded = False
         for attempt in range(SCRAPE_MAX_RETRIES):
             try:
-                driver.get(url)
+                driver.get(country_url)
                 WebDriverWait(driver, SCRAPE_PAGE_TIMEOUT_SECONDS).until(
-                    EC.presence_of_element_located((By.CLASS_NAME, "payouts-details-table"))
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "select"))
                 )
                 page_loaded = True
                 break
             except Exception:
                 if attempt < SCRAPE_MAX_RETRIES - 1:
                     time.sleep(SCRAPE_RETRY_DELAY_SECONDS)
+
         if not page_loaded:
             failed.append(country_name)
             continue
 
-        soup  = BeautifulSoup(driver.page_source, "html.parser")
-        spans = soup.find_all("span", class_="payouts-details-table")
+        soup = BeautifulSoup(driver.page_source, "html.parser")
+        select_el = soup.find("select")
+        if not select_el:
+            failed.append(country_name)
+            continue
 
-        for span in spans:
+        method_options = [
+            (opt.get("value", "").strip(), opt.get_text(strip=True).split(" · ")[0].strip())
+            for opt in select_el.find_all("option")
+            if opt.get("value", "").strip()
+        ]
+        if not method_options:
+            failed.append(country_name)
+            continue
+
+        # ── Step 2: scrape each method by navigating to its direct URL ────────
+        for method_id, method_label in method_options:
+            method_url = f"https://atlas.nium.com/country/{slug}?method={method_id}{fi_param}"
+
+            page_loaded = False
+            for attempt in range(SCRAPE_MAX_RETRIES):
+                try:
+                    driver.get(method_url)
+                    WebDriverWait(driver, SCRAPE_PAGE_TIMEOUT_SECONDS).until(
+                        EC.presence_of_element_located(
+                            (By.CSS_SELECTOR, ".figma-route-summary__row")
+                        )
+                    )
+                    page_loaded = True
+                    break
+                except Exception:
+                    if attempt < SCRAPE_MAX_RETRIES - 1:
+                        time.sleep(SCRAPE_RETRY_DELAY_SECONDS)
+
+            if not page_loaded:
+                continue
+
             try:
-                raw_title = span.find(string=True, recursive=False)
-                if not raw_title:
-                    continue
-                title = _normalize_title(raw_title.strip())
-
-                currency, tat = "", ""
-                small_tag = span.find("small")
-                if small_tag:
-                    lines = [l.strip() for l in small_tag.stripped_strings if l.strip()]
-                    if lines:
-                        currency = lines[0]
-                    if len(lines) > 1:
-                        tat = _normalize_tat(lines[1])
-
-                modes_div = span.find("div", class_="hidden")
-                modes     = modes_div.get_text(strip=True) if modes_div else ""
-
-                parent_h3 = span.find_parent("h3")
-                if not parent_h3:
-                    continue
-                body_div = parent_h3.find_next("div", id=lambda x: x and "accordion-collapse-body" in x)
-                if not body_div:
-                    continue
-
-                # Key-value blocks
-                payout_blocks = body_div.find_all(
-                    "div", class_="overflow-hidden bg-white border mb-5 font-normal payouts-details-table"
-                )
-                for block in payout_blocks:
-                    rows = block.find_all("div", class_="bg-gray-50 px-4 py-5 sm:grid sm:grid-cols-3 sm:gap-4 sm:px-6")
-                    for row in rows:
-                        key_tag   = row.find("dt")
-                        value_tag = row.find("dd")
-                        if not key_tag or not value_tag:
-                            continue
-                        key = key_tag.get_text(strip=True)
-                        if key in ("Mandatory data requirements", "Supporting Documents"):
-                            value = _extract_pills(value_tag)
-                        else:
-                            value = value_tag.get_text(strip=True)
-                        raw_rows.append({
-                            "Country": country_name, "Payment Mode": title,
-                            "Currency": currency, "TAT": tat,
-                            "Supported Modes": modes, "Key": key, "Value": value,
-                        })
-
-                # Tables (transaction limits)
-                for table in body_div.find_all("table"):
-                    table_title = "Transaction limit per end-user"
-                    parent_div  = table.find_parent("div")
-                    if parent_div:
-                        dt_tag = parent_div.find_previous_sibling("dt") or parent_div.find("dt")
-                        if not dt_tag:
-                            outer_div = parent_div.find_parent("div")
-                            if outer_div:
-                                dt_tag = outer_div.find("dt")
-                        if dt_tag:
-                            table_title = dt_tag.get_text(strip=True)
-
-                    headers = []
-                    thead   = table.find("thead")
-                    if thead:
-                        headers = [th.get_text(strip=True) for th in thead.find_all("th") if th.get_text(strip=True)]
-
-                    tbody = table.find("tbody")
-                    if tbody:
-                        for tr in tbody.find_all("tr"):
-                            cells = tr.find_all(["th", "td"])
-                            if not cells:
-                                continue
-                            row_label = cells[0].get_text(strip=True)
-                            for ci, cell in enumerate(cells[1:]):
-                                if ci < len(headers):
-                                    raw_rows.append({
-                                        "Country": country_name, "Payment Mode": title,
-                                        "Currency": currency, "TAT": tat,
-                                        "Supported Modes": modes,
-                                        "Key":   f"{table_title} - {headers[ci]} - {row_label}",
-                                        "Value": cell.get_text(strip=True),
-                                    })
+                method_soup = BeautifulSoup(driver.page_source, "html.parser")
+                method_rows = _parse_method_page(method_soup, country_name, method_label)
+                raw_rows.extend(method_rows)
             except Exception:
                 continue
 
@@ -253,9 +328,10 @@ def transform_raw_to_wide(raw_rows):
 
     other_cols = [c for c in df_wide.columns if c not in id_cols]
     preferred_order = [
-        "Supported Modes 1", "Supported Currencies", "Network Participant",
-        "Channels", "Cutoff & delivery timing", "Mandatory data requirements",
-        "Supporting Documents", "Beneficiary Statement Narrative", "Proof of Payment", "Notes",
+        "Network participant", "Channels", "Routing code",
+        "Cutoff & delivery timing", "Mandatory data requirements",
+        "Supporting documents", "Beneficiary statement narrative",
+        "Proof of payment", "Beneficiary account type", "Notes",
     ]
     ordered = [c for c in preferred_order if c in other_cols]
     remaining = sorted(c for c in other_cols if c not in ordered)
